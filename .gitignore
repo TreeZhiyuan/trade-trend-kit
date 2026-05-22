@@ -156,6 +156,12 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+data/
+logs/
+*.tmp
+*.bak
+config/*.local.json
+config/*.secret.json
 
 # Spyder project settings
 .spyderproject

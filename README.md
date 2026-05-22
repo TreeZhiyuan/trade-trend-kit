@@ -1,7 +1,32 @@
-### trade-trend-kit
-personal trade trend kit
+# trade-trend-kit
 
-use [twscrape](https://github.com/vladkens/twscrape) or [Twikit](https://github.com/d60/twikit) to download x's posts for invest advise
+Personal trade trend kit for collecting X finance posts and generating investment trend reports.
+
+The project is being built incrementally so each module can be reviewed before the next feature is added.
+
+## Current Skeleton
+
+- Python package uses the `src/trade_trend_kit` layout.
+- CLI entry point is reserved as `trade-trend-kit`.
+- Runtime config example is available at `config/x.example.json`.
+- Default local config placeholder is available at `config/x.json`.
+- Generated runtime data will live under ignored `data/` and `logs/` directories.
+
+## Local Commands
+
+Install the package in editable mode first:
+
+```bash
+python -m pip install -e .
+```
+
+```bash
+python -m trade_trend_kit validate-config
+python -m trade_trend_kit fetch-once
+python -m trade_trend_kit run
+```
+
+These commands are scaffolded in step 1 and will gain real behavior in later steps.
 
 ## Design
 

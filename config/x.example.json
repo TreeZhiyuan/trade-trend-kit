@@ -1,0 +1,21 @@
+{
+  "timezone": "Asia/Shanghai",
+  "fetch_interval_minutes": 15,
+  "tweet_limit": 10,
+  "analysis_language": "zh-CN",
+  "preserve_english_summary": true,
+  "accounts": [
+    {
+      "account": "example_user",
+      "display_name": "Example Analyst",
+      "enabled": true,
+      "market": "US_STOCK",
+      "category": "macro",
+      "region": "US",
+      "tags": ["macro", "fed", "nasdaq"],
+      "priority": 1,
+      "watch_symbols": ["SPY", "QQQ", "NVDA"],
+      "notes": "Macro and US equity commentary"
+    }
+  ]
+}
