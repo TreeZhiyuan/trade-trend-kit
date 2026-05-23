@@ -14,9 +14,10 @@ The project is being built incrementally so each module can be reviewed before t
 
 ## Local Commands
 
-Install the package in editable mode first:
+Install dependencies and the package in editable mode first:
 
 ```bash
+python -m pip install -r requirements-dev.txt
 python -m pip install -e .
 ```
 
@@ -27,6 +28,12 @@ python -m trade_trend_kit run
 ```
 
 These commands are scaffolded in step 1 and will gain real behavior in later steps.
+
+## Dependency Policy
+
+- Add runtime dependencies to `requirements.txt`.
+- Add test, lint, and development-only dependencies to `requirements-dev.txt`.
+- Keep `pyproject.toml` aligned when a dependency is also required for packaging or the CLI entry point.
 
 ## Design
 
