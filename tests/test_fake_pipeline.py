@@ -54,6 +54,9 @@ def test_fake_pipeline_generates_files_and_state_then_skips_existing_tweets(
         tmp_path / "reports" / "2026-05-23" / "accounts" / f"{stem}.history.json"
     )
     daily_latest = read_json_file(tmp_path / "reports" / "2026-05-23" / "daily_report.json")
+    daily_markdown = (tmp_path / "reports" / "2026-05-23" / "daily_report.md").read_text(
+        encoding="utf-8"
+    )
     daily_history = read_json_file(
         tmp_path / "reports" / "2026-05-23" / "daily_report.history.json"
     )
@@ -76,6 +79,7 @@ def test_fake_pipeline_generates_files_and_state_then_skips_existing_tweets(
     assert len(account_history) == 1
     assert account_latest["chinese_report"]["summary"].startswith("fake 分析")
     assert daily_latest["report_count"] == 1
+    assert daily_markdown.startswith("# 2026-05-23 投资方向参考报告")
     assert len(daily_history) == 1
     assert state["accounts"]["macro_blogger"]["consecutive_failures"] == 0
     assert len(state["accounts"]["macro_blogger"]["analyzed_tweet_ids"]) == 3

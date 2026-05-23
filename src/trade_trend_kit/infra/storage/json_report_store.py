@@ -7,20 +7,25 @@ without changing the application layer.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from trade_trend_kit.domain.errors import StorageError
 from trade_trend_kit.domain.models import AccountIncrementalReport, DailyReport
 from trade_trend_kit.domain.ports import ReportRepository
-from trade_trend_kit.utils.filenames import build_report_file_stem
-from trade_trend_kit.utils.json_io import read_json_file, write_json_file
+from trade_trend_kit.utils.filenames import build_file_stem, build_report_file_stem
+from trade_trend_kit.utils.json_io import read_json_file, write_json_file, write_text_file
+from trade_trend_kit.utils.report_rendering import (
+    render_account_report_markdown,
+    render_daily_report_markdown,
+)
 
 DEFAULT_REPORTS_DIR = Path("data/reports")
 
 
 class JsonReportRepository(ReportRepository):
-    """Persist account reports and daily reports as JSON files."""
+    """Persist account and daily reports as JSON plus Markdown archives."""
 
     def __init__(self, base_dir: Path | str = DEFAULT_REPORTS_DIR) -> None:
         self.base_dir = Path(base_dir)
@@ -28,41 +33,74 @@ class JsonReportRepository(ReportRepository):
     async def save_account_report(self, report: AccountIncrementalReport) -> None:
         """Persist one account report snapshot and append to its history."""
 
-        latest_path, history_path = self._account_report_paths(report)
+        paths = self._account_report_paths(report)
         payload = report.model_dump(mode="json")
-        self._write_latest(latest_path, payload)
-        self._write_history(history_path, payload, key_field="report_id")
+        markdown = render_account_report_markdown(report)
+        self._write_latest(paths.latest_json, payload)
+        self._write_latest_text(paths.latest_markdown, markdown)
+        self._write_archive(paths.archive_json, payload)
+        self._write_archive_text(paths.archive_markdown, markdown)
+        self._write_history(paths.history_json, payload, key_field="report_id")
 
     async def save_daily_report(self, report: DailyReport) -> None:
         """Persist the current daily aggregate snapshot and append history."""
 
-        latest_path, history_path = self._daily_report_paths(report)
+        paths = self._daily_report_paths(report)
         payload = report.model_dump(mode="json")
-        self._write_latest(latest_path, payload)
-        self._write_history(history_path, payload, key_field="updated_at")
+        markdown = render_daily_report_markdown(report)
+        self._write_latest(paths.latest_json, payload)
+        self._write_latest_text(paths.latest_markdown, markdown)
+        self._write_archive(paths.archive_json, payload)
+        self._write_archive_text(paths.archive_markdown, markdown)
+        self._write_history(paths.history_json, payload, key_field="updated_at")
 
     def _account_report_paths(
         self,
         report: AccountIncrementalReport,
-    ) -> tuple[Path, Path]:
+    ) -> "_ReportArchivePaths":
         stem = build_report_file_stem(report.market, report.category, report.account)
         report_dir = self.base_dir / report.date / "accounts"
-        return (
-            report_dir / f"{stem}.latest.json",
-            report_dir / f"{stem}.history.json",
+        archive_dir = report_dir / "archive"
+        archive_stem = build_file_stem(stem, report.report_id)
+        return _ReportArchivePaths(
+            latest_json=report_dir / f"{stem}.latest.json",
+            latest_markdown=report_dir / f"{stem}.latest.md",
+            history_json=report_dir / f"{stem}.history.json",
+            archive_json=archive_dir / f"{archive_stem}.json",
+            archive_markdown=archive_dir / f"{archive_stem}.md",
         )
 
-    def _daily_report_paths(self, report: DailyReport) -> tuple[Path, Path]:
+    def _daily_report_paths(self, report: DailyReport) -> "_ReportArchivePaths":
         report_dir = self.base_dir / report.date
-        return (
-            report_dir / "daily_report.json",
-            report_dir / "daily_report.history.json",
+        archive_dir = report_dir / "archive"
+        archive_stem = build_file_stem("daily_report", report.updated_at.isoformat())
+        return _ReportArchivePaths(
+            latest_json=report_dir / "daily_report.json",
+            latest_markdown=report_dir / "daily_report.md",
+            history_json=report_dir / "daily_report.history.json",
+            archive_json=archive_dir / f"{archive_stem}.json",
+            archive_markdown=archive_dir / f"{archive_stem}.md",
         )
 
     def _write_latest(self, path: Path, payload: dict[str, Any]) -> None:
         """Write the latest report snapshot atomically."""
 
         write_json_file(path, payload)
+
+    def _write_latest_text(self, path: Path, text: str) -> None:
+        """Write the latest Markdown snapshot atomically."""
+
+        write_text_file(path, text)
+
+    def _write_archive(self, path: Path, payload: dict[str, Any]) -> None:
+        """Write an immutable JSON archive file for this report version."""
+
+        write_json_file(path, payload)
+
+    def _write_archive_text(self, path: Path, text: str) -> None:
+        """Write an immutable Markdown archive file for this report version."""
+
+        write_text_file(path, text)
 
     def _write_history(self, path: Path, payload: dict[str, Any], key_field: str) -> None:
         """Merge a report snapshot into the history file by a stable key."""
@@ -91,3 +129,14 @@ class JsonReportRepository(ReportRepository):
                 raise StorageError(f"Report history entry must be an object: {path}")
             history.append(entry)
         return history
+
+
+@dataclass(frozen=True)
+class _ReportArchivePaths:
+    """Paths written when saving one report version."""
+
+    latest_json: Path
+    latest_markdown: Path
+    history_json: Path
+    archive_json: Path
+    archive_markdown: Path

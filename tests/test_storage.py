@@ -12,10 +12,13 @@ from trade_trend_kit.domain.models import (
     AccountRuntimeState,
     ChineseAccountReport,
     DailyReport,
+    DailyCandidateSymbol,
+    EnglishSourceSummary,
     NormalizedTweet,
     RawTweet,
     RawTweetBatch,
     RuntimeState,
+    StockWatchItem,
     TweetMetrics,
     XUser,
 )
@@ -84,7 +87,23 @@ def make_account_report(report_id: str = "report-1") -> AccountIncrementalReport
         category=account.category,
         new_tweet_count=1,
         source_tweet_ids=["1"],
-        chinese_report=ChineseAccountReport(summary="summary", market_direction="neutral"),
+        english_source_summaries=[
+            EnglishSourceSummary(tweet_id="1", summary="Rates remain important.")
+        ],
+        chinese_report=ChineseAccountReport(
+            summary="summary",
+            market_direction="neutral",
+            key_themes=["rates"],
+            stock_watchlist=[
+                StockWatchItem(
+                    symbol="SPY",
+                    direction="关注",
+                    reason="macro signal",
+                    risk="single source",
+                )
+            ],
+            risk_notes=["risk note"],
+        ),
         created_at=fixed_time(),
     )
 
@@ -97,6 +116,16 @@ def make_daily_report(updated_at: datetime | None = None) -> DailyReport:
         source_accounts=["ExampleUser"],
         source_tweet_ids=["1"],
         market_overview="neutral",
+        consensus_themes=["rates"],
+        candidate_symbols=[
+            DailyCandidateSymbol(
+                symbol="SPY",
+                market="US_STOCK",
+                direction="关注",
+                reason="macro signal",
+            )
+        ],
+        risk_events=["FOMC"],
         updated_at=updated_at or fixed_time(),
     )
 
@@ -164,7 +193,9 @@ def test_json_tweet_repository_merges_daily_raw_and_normalized_tweets(
     assert {tweet["tweet_id"] for tweet in normalized_payload["tweets"]} == {"1", "2"}
 
 
-def test_json_report_repository_saves_latest_and_history(tmp_path: Path) -> None:
+def test_json_report_repository_saves_latest_history_and_markdown_archives(
+    tmp_path: Path,
+) -> None:
     repo = JsonReportRepository(tmp_path / "reports")
     account_report = make_account_report()
     daily_report = make_daily_report()
@@ -178,12 +209,26 @@ def test_json_report_repository_saves_latest_and_history(tmp_path: Path) -> None
     account_dir = tmp_path / "reports" / "2026-05-23" / "accounts"
     account_latest = read_json_file(account_dir / f"{stem}.latest.json")
     account_history = read_json_file(account_dir / f"{stem}.history.json")
+    account_latest_markdown = (account_dir / f"{stem}.latest.md").read_text(encoding="utf-8")
+    account_archive_dir = account_dir / "archive"
     daily_latest = read_json_file(tmp_path / "reports" / "2026-05-23" / "daily_report.json")
+    daily_latest_markdown = (
+        tmp_path / "reports" / "2026-05-23" / "daily_report.md"
+    ).read_text(encoding="utf-8")
     daily_history = read_json_file(
         tmp_path / "reports" / "2026-05-23" / "daily_report.history.json"
     )
+    daily_archive_dir = tmp_path / "reports" / "2026-05-23" / "archive"
 
     assert account_latest["report_id"] == "report-1"
     assert len(account_history) == 1
+    assert account_latest_markdown.startswith("# US_STOCK / macro / @ExampleUser")
+    assert "## 英文原文摘要" in account_latest_markdown
+    assert len(list(account_archive_dir.glob("*.json"))) == 1
+    assert len(list(account_archive_dir.glob("*.md"))) == 1
     assert daily_latest["date"] == "2026-05-23"
+    assert daily_latest_markdown.startswith("# 2026-05-23 投资方向参考报告")
+    assert "## 候选标的" in daily_latest_markdown
     assert len(daily_history) == 1
+    assert len(list(daily_archive_dir.glob("*.json"))) == 1
+    assert len(list(daily_archive_dir.glob("*.md"))) == 1

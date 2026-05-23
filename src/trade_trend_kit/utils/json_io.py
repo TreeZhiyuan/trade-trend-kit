@@ -35,6 +35,12 @@ def write_json_file(path: Path, data: Any) -> None:
     _write_text_atomic(path, f"{text}\n")
 
 
+def write_text_file(path: Path, text: str) -> None:
+    """Atomically write UTF-8 text to a file."""
+
+    _write_text_atomic(path, text)
+
+
 def append_jsonl_file(path: Path, rows: list[dict[str, Any]]) -> None:
     """Append JSON lines using an atomic rewrite."""
 
