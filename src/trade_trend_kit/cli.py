@@ -1,3 +1,5 @@
+"""Minimal CLI scaffold used by step 1 and extended in later steps."""
+
 from __future__ import annotations
 
 import argparse
@@ -27,6 +29,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("trade-trend-kit: fetch-once mode is not implemented yet.")
         return 0
     if args.command == "validate-config":
+        # Step 1 only checks whether the expected config files exist.
         config_path = Path("config/x.json")
         example_path = Path("config/x.example.json")
         if config_path.exists():
