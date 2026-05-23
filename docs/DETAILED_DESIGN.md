@@ -646,12 +646,16 @@ Behavior:
 - `max_instances=1` prevents overlapping jobs.
 - `coalesce=true` merges delayed runs if the process was busy.
 - The job should also maintain an internal async lock for safety.
+- The scheduler reloads `config/x.json` before every cycle.
+- If `fetch_interval_minutes` or `timezone` changes, the scheduler reschedules the interval job after the current cycle.
 
 CLI commands:
 
 ```bash
-trade-trend-kit run
-trade-trend-kit fetch-once
+trade-trend-kit run --fake
+trade-trend-kit run --twikit --llm
+trade-trend-kit fetch-once --fake
+trade-trend-kit fetch-once --twikit --llm
 trade-trend-kit validate-config
 ```
 
@@ -770,8 +774,8 @@ These fakes make future refactors safer and keep business logic testable without
 
 当前实现状态：
 
-- Step 1 到 Step 10 已完成。
-- 下一步优先推进 Step 11，接入 15 分钟调度与持续运行能力。
+- Step 1 到 Step 11 已完成。
+- 下一步优先推进 Step 12，补齐发布与推送预留输出。
 
 ### 19.2 Per-step Review Focus
 

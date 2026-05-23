@@ -1,3 +1,4 @@
+APScheduler>=3.10,<4
 pydantic>=2.7
 twikit>=2.3.3
 tzdata>=2024.1

@@ -26,7 +26,8 @@ python -m trade_trend_kit validate-config
 python -m trade_trend_kit fetch-once --fake
 python -m trade_trend_kit fetch-once --twikit
 python -m trade_trend_kit fetch-once --twikit --llm
-python -m trade_trend_kit run
+python -m trade_trend_kit run --fake
+python -m trade_trend_kit run --twikit --llm
 ```
 
 `fetch-once --fake` runs a deterministic local end-to-end pipeline. It reads
@@ -35,6 +36,11 @@ python -m trade_trend_kit run
 `fetch-once --twikit` uses the real Twikit adapter for X collection while
 keeping fake analysis by default. Add `--llm` to use an OpenAI-compatible
 analysis provider configured by `LLM_*` values in `.env`.
+
+`run --fake` or `run --twikit --llm` starts the scheduled collector. The
+scheduler uses `fetch_interval_minutes` from `config/x.json`, runs one cycle
+immediately by default, reloads config before each cycle, and prevents
+overlapping scheduled runs.
 
 ## Dependency Policy
 

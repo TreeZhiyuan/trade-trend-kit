@@ -16,13 +16,54 @@ from trade_trend_kit.app.services import (
 from trade_trend_kit.config import DEFAULT_CONFIG_PATH, load_config, summarize_config
 from trade_trend_kit.domain.errors import ConfigError, TradeTrendKitError
 from trade_trend_kit.domain.models import RuntimeConfig
+from trade_trend_kit.logging_config import configure_logging
+from trade_trend_kit.scheduler import ScheduledRunSettings, run_scheduled_collector
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="trade-trend-kit")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("run", help="Run the scheduled collector")
+    run_parser = subparsers.add_parser("run", help="Run the scheduled collector")
+    run_parser.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG_PATH,
+        help=f"Path to config JSON. Defaults to {DEFAULT_CONFIG_PATH}.",
+    )
+    run_parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=DEFAULT_DATA_DIR,
+        help=f"Local runtime data directory. Defaults to {DEFAULT_DATA_DIR}.",
+    )
+    run_parser.add_argument(
+        "--fake",
+        action="store_true",
+        help="Run the deterministic local fake pipeline instead of real integrations.",
+    )
+    run_parser.add_argument(
+        "--twikit",
+        action="store_true",
+        help="Fetch real X posts through Twikit.",
+    )
+    run_parser.add_argument(
+        "--llm",
+        action="store_true",
+        help="Use the OpenAI-compatible analyzer instead of the fake analyzer.",
+    )
+    run_parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=Path(".env"),
+        help="Path to environment file with credentials. Defaults to .env.",
+    )
+    run_parser.add_argument(
+        "--log-level",
+        type=str,
+        default=None,
+        help="Override LOG_LEVEL for console logging.",
+    )
     fetch_once_parser = subparsers.add_parser("fetch-once", help="Run one collection cycle")
     fetch_once_parser.add_argument(
         "--config",
@@ -73,7 +114,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "run":
-        print("trade-trend-kit: run mode is not implemented yet.")
+        configure_logging(args.log_level)
+        if args.fake == args.twikit:
+            print("trade-trend-kit: run requires exactly one mode: --fake or --twikit.")
+            return 2
+        settings = ScheduledRunSettings(
+            config_path=args.config,
+            data_dir=args.data_dir,
+            env_file=args.env_file,
+            source="fake" if args.fake else "twikit",
+            use_llm_analyzer=args.llm,
+        )
+        try:
+            asyncio.run(run_scheduled_collector(settings))
+        except KeyboardInterrupt:
+            return 0
+        except TradeTrendKitError as exc:
+            print(f"Run failed: {exc}")
+            return 1
         return 0
     if args.command == "fetch-once":
         if args.fake == args.twikit:
@@ -120,12 +178,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 2
 
 
-async def _run_fake_fetch_once(
-    config: RuntimeConfig,
-    data_dir: Path,
-    env_file: Path,
-    use_llm_analyzer: bool,
-):
+async def _run_fake_fetch_once(config: RuntimeConfig, data_dir: Path, env_file: Path, use_llm_analyzer: bool):
     """Load config and execute one fake cycle behind the synchronous CLI."""
 
     job = build_fake_fetch_job(
@@ -137,12 +190,7 @@ async def _run_fake_fetch_once(
     return await job.run_once(config)
 
 
-async def _run_twikit_fetch_once(
-    config: RuntimeConfig,
-    data_dir: Path,
-    env_file: Path,
-    use_llm_analyzer: bool,
-):
+async def _run_twikit_fetch_once(config: RuntimeConfig, data_dir: Path, env_file: Path, use_llm_analyzer: bool):
     """Load config and execute one Twikit-backed cycle behind the synchronous CLI."""
 
     job = build_twikit_fetch_job(

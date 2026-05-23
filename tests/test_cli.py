@@ -43,6 +43,34 @@ def test_cli_parser_accepts_fake_fetch_once_options() -> None:
     assert args.env_file == Path(".env.local")
 
 
+def test_cli_parser_accepts_run_options() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "run",
+            "--twikit",
+            "--llm",
+            "--config",
+            "custom.json",
+            "--data-dir",
+            "runtime-data",
+            "--env-file",
+            ".env.local",
+            "--log-level",
+            "DEBUG",
+        ]
+    )
+
+    assert args.command == "run"
+    assert args.twikit is True
+    assert args.llm is True
+    assert args.config == Path("custom.json")
+    assert args.data_dir == Path("runtime-data")
+    assert args.env_file == Path(".env.local")
+    assert args.log_level == "DEBUG"
+
+
 def test_validate_config_command_returns_zero_for_valid_config(tmp_path: Path) -> None:
     config_path = tmp_path / "x.json"
     config_path.write_text(
@@ -71,6 +99,48 @@ def test_validate_config_command_returns_one_for_invalid_config(tmp_path: Path) 
 
 def test_fetch_once_requires_fake_flag() -> None:
     assert main(["fetch-once"]) == 2
+
+
+def test_run_requires_one_source_mode() -> None:
+    assert main(["run"]) == 2
+
+
+def test_run_command_invokes_scheduler_with_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_settings = []
+
+    async def fake_run_scheduled_collector(settings):
+        captured_settings.append(settings)
+
+    monkeypatch.setattr(
+        "trade_trend_kit.cli.run_scheduled_collector",
+        fake_run_scheduled_collector,
+    )
+
+    exit_code = main(
+        [
+            "run",
+            "--fake",
+            "--llm",
+            "--config",
+            str(tmp_path / "x.json"),
+            "--data-dir",
+            str(tmp_path / "data"),
+            "--env-file",
+            str(tmp_path / ".env"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert len(captured_settings) == 1
+    settings = captured_settings[0]
+    assert settings.source == "fake"
+    assert settings.use_llm_analyzer is True
+    assert settings.config_path == tmp_path / "x.json"
+    assert settings.data_dir == tmp_path / "data"
+    assert settings.env_file == tmp_path / ".env"
 
 
 def test_fetch_once_llm_requires_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
