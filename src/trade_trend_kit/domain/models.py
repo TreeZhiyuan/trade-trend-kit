@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class DomainModel(BaseModel):
@@ -71,6 +71,36 @@ class RuntimeConfig(DomainModel):
     analysis_language: str = "zh-CN"
     preserve_english_summary: bool = True
     accounts: list[AccountConfig] = Field(default_factory=list)
+
+    @field_validator("timezone", "analysis_language")
+    @classmethod
+    def normalize_non_empty_string(cls, value: str) -> str:
+        """Trim string settings that are later shown in reports and logs."""
+
+        normalized = value.strip()
+        if not normalized:
+            msg = "value cannot be empty"
+            raise ValueError(msg)
+        return normalized
+
+    @model_validator(mode="after")
+    def ensure_unique_accounts(self) -> "RuntimeConfig":
+        """Prevent duplicate handles or file keys from overwriting local files."""
+
+        accounts_seen: set[str] = set()
+        file_keys_seen: set[str] = set()
+        for account in self.accounts:
+            account_key = account.account.lower()
+            file_key = account.file_key.lower()
+            if account_key in accounts_seen:
+                msg = f"duplicate account configured: {account.account}"
+                raise ValueError(msg)
+            if file_key in file_keys_seen:
+                msg = f"duplicate account file key configured: {account.file_key}"
+                raise ValueError(msg)
+            accounts_seen.add(account_key)
+            file_keys_seen.add(file_key)
+        return self
 
 
 class TweetMetrics(DomainModel):

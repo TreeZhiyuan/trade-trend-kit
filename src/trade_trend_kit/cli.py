@@ -6,6 +6,9 @@ import argparse
 from pathlib import Path
 from typing import Sequence
 
+from trade_trend_kit.config import DEFAULT_CONFIG_PATH, load_config, summarize_config
+from trade_trend_kit.domain.errors import ConfigError
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="trade-trend-kit")
@@ -13,7 +16,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("run", help="Run the scheduled collector")
     subparsers.add_parser("fetch-once", help="Run one collection cycle")
-    subparsers.add_parser("validate-config", help="Validate config/x.json")
+    validate_parser = subparsers.add_parser("validate-config", help="Validate config/x.json")
+    validate_parser.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG_PATH,
+        help=f"Path to config JSON. Defaults to {DEFAULT_CONFIG_PATH}.",
+    )
 
     return parser
 
@@ -29,15 +38,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("trade-trend-kit: fetch-once mode is not implemented yet.")
         return 0
     if args.command == "validate-config":
-        # Step 1 only checks whether the expected config files exist.
-        config_path = Path("config/x.json")
-        example_path = Path("config/x.example.json")
-        if config_path.exists():
-            print(f"Config found: {config_path}")
-        elif example_path.exists():
-            print(f"Config not found, example available at: {example_path}")
-        else:
-            print("No config file found.")
+        try:
+            config = load_config(args.config)
+        except ConfigError as exc:
+            print(f"Config invalid: {exc}")
+            return 1
+        print(summarize_config(config))
         return 0
 
     parser.error(f"unknown command: {args.command}")
