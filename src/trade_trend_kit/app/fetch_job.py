@@ -11,8 +11,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from trade_trend_kit.app.incremental import (
+    account_state_key,
+    build_failure_account_state,
+    build_success_account_state,
+    select_new_tweets,
+)
 from trade_trend_kit.app.report_job import build_daily_report
-from trade_trend_kit.domain.models import AccountConfig, AccountRuntimeState, RuntimeConfig
+from trade_trend_kit.domain.models import AccountRuntimeState, RuntimeConfig
 from trade_trend_kit.domain.ports import (
     ReportRepository,
     StateRepository,
@@ -21,8 +27,6 @@ from trade_trend_kit.domain.ports import (
     XPostClient,
 )
 from trade_trend_kit.utils.time import now_in_timezone
-
-MAX_TRACKED_TWEET_IDS = 5_000
 
 
 @dataclass(frozen=True)
@@ -84,7 +88,7 @@ class FetchAndAnalyzeJob:
         new_tweet_count = 0
 
         for account in enabled_accounts:
-            state_key = _state_key(account)
+            state_key = account_state_key(account)
             account_state = state.accounts.get(state_key, AccountRuntimeState())
             fetched_at = self.clock(config.timezone)
 
@@ -94,56 +98,44 @@ class FetchAndAnalyzeJob:
                     limit=config.tweet_limit,
                 )
                 fetched_tweets = fetch_result.normalized_tweets
-                fetched_tweet_ids = [tweet.tweet_id for tweet in fetched_tweets]
-                already_analyzed_ids = set(account_state.analyzed_tweet_ids)
-                new_tweets = [
-                    tweet for tweet in fetched_tweets if tweet.tweet_id not in already_analyzed_ids
-                ]
+                selection = select_new_tweets(fetched_tweets, account_state)
 
                 await self.tweet_repository.save_raw(fetch_result.raw_batch)
                 await self.tweet_repository.save_normalized(fetched_tweets)
 
                 report_id = None
-                if new_tweets:
-                    report = await self.analyzer.analyze_account_tweets(account, new_tweets)
+                if selection.new_tweets:
+                    report = await self.analyzer.analyze_account_tweets(
+                        account,
+                        selection.new_tweets,
+                    )
                     await self.report_repository.save_account_report(report)
                     generated_reports.append(report)
                     report_id = report.report_id
 
                 fetched_tweet_count += len(fetched_tweets)
-                new_tweet_count += len(new_tweets)
-                state.accounts[state_key] = AccountRuntimeState(
+                new_tweet_count += len(selection.new_tweets)
+                state.accounts[state_key] = build_success_account_state(
+                    previous=account_state,
                     user_id=fetch_result.user.user_id,
-                    last_fetch_at=fetch_result.raw_batch.fetched_at,
-                    last_success_at=fetched_at,
-                    seen_tweet_ids=_merge_tweet_ids(
-                        account_state.seen_tweet_ids,
-                        fetched_tweet_ids,
-                    ),
-                    analyzed_tweet_ids=_merge_tweet_ids(
-                        account_state.analyzed_tweet_ids,
-                        [tweet.tweet_id for tweet in new_tweets],
-                    ),
-                    last_error=None,
-                    consecutive_failures=0,
+                    fetched_at=fetch_result.raw_batch.fetched_at,
+                    success_at=fetched_at,
+                    fetched_tweet_ids=selection.fetched_tweet_ids,
+                    analyzed_tweet_ids=selection.new_tweet_ids,
                 )
                 account_summaries.append(
                     AccountCycleSummary(
                         account=account.account,
                         fetched_tweet_count=len(fetched_tweets),
-                        new_tweet_count=len(new_tweets),
+                        new_tweet_count=len(selection.new_tweets),
                         report_id=report_id,
                     )
                 )
             except Exception as exc:  # noqa: BLE001 - keep one bad account from blocking others.
-                state.accounts[state_key] = AccountRuntimeState(
-                    user_id=account_state.user_id,
-                    last_fetch_at=fetched_at,
-                    last_success_at=account_state.last_success_at,
-                    seen_tweet_ids=account_state.seen_tweet_ids,
-                    analyzed_tweet_ids=account_state.analyzed_tweet_ids,
-                    last_error=str(exc),
-                    consecutive_failures=account_state.consecutive_failures + 1,
+                state.accounts[state_key] = build_failure_account_state(
+                    previous=account_state,
+                    attempted_at=fetched_at,
+                    error=exc,
                 )
                 account_summaries.append(
                     AccountCycleSummary(account=account.account, error=str(exc))
@@ -196,21 +188,3 @@ def format_fetch_cycle_summary(summary: FetchCycleSummary) -> str:
         )
     return "\n".join(lines)
 
-
-def _state_key(account: AccountConfig) -> str:
-    """Use a case-stable account key so config casing changes do not reset state."""
-
-    return account.account.lower()
-
-
-def _merge_tweet_ids(
-    existing_ids: list[str],
-    new_ids: list[str],
-    max_items: int = MAX_TRACKED_TWEET_IDS,
-) -> list[str]:
-    """Merge tweet IDs while preserving first-seen order and bounding state size."""
-
-    merged = list(dict.fromkeys([*existing_ids, *new_ids]))
-    if len(merged) <= max_items:
-        return merged
-    return merged[-max_items:]
