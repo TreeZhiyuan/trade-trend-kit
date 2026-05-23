@@ -758,15 +758,15 @@ These fakes make future refactors safer and keep business logic testable without
 | Step 5 | 端到端 fake 流水线 | `infra/fake/*`、`app/fetch_job.py`、`app/report_job.py`、`fetch-once --fake` | 数据流是否闭环、只分析新增推文是否成立、状态和报告是否会重复写入 |
 | Step 6 | 增量分析逻辑 | `app/incremental.py`、`FetchAndAnalyzeJob` 状态更新改造、增量单测 | 只分析新增推文是否稳定，分析失败是否不会误标记 `analyzed_tweet_ids`，状态更新是否可测试 |
 | Step 7 | 报告生成与归档 | Markdown 渲染、latest/history/archive 报告文件、归档测试 | JSON 与 Markdown 是否同时生成，history/archive 是否幂等，日报是否适合后续推送服务读取 |
-| Step 8 | 接入真实 Twikit 适配器 | `infra/x/twikit_client.py` 的真实实现、账号登录/抓取/错误映射 | Twikit 对象是否在边界转换，异常是否归一化，是否只在适配层依赖第三方 SDK |
+| Step 8 | 接入真实 Twikit 适配器 | `infra/x/twikit_client.py` 的真实实现、`fetch-once --twikit`、账号登录/抓取/错误映射 | Twikit 对象是否在边界转换，异常是否归一化，是否只在适配层依赖第三方 SDK |
 | Step 9 | 接入真实 OpenAI-compatible 分析器 | `infra/llm/openai_compatible.py`、`infra/llm/prompts.py` | Prompt 是否约束输出 JSON，是否保留英文摘要，失败重试和坏 JSON 是否可恢复 |
 | Step 10 | 计划任务与持续运行 | `scheduler.py`、`run` 命令、周期执行 | 是否 15 分钟调度，是否避免重叠执行，是否支持配置热重载 |
 | Step 11 | 发布与推送预留 | `infra/publishing/*`、日报导出格式 | 输出是否适合后续推送，字段是否足够稳定，是否便于不同渠道复用 |
 
 当前实现状态：
 
-- Step 1 到 Step 7 已完成。
-- 下一步优先推进 Step 8，把真实 Twikit 适配器接入到现有 fake 流水线替换点。
+- Step 1 到 Step 8 已完成。
+- 下一步优先推进 Step 9，把 OpenAI-compatible 分析器接入到现有 fake analyzer 替换点。
 
 ### 19.2 Per-step Review Focus
 

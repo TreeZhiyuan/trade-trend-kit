@@ -8,7 +8,11 @@ from pathlib import Path
 from typing import Sequence
 
 from trade_trend_kit.app.fetch_job import format_fetch_cycle_summary
-from trade_trend_kit.app.services import DEFAULT_DATA_DIR, build_fake_fetch_job
+from trade_trend_kit.app.services import (
+    DEFAULT_DATA_DIR,
+    build_fake_fetch_job,
+    build_twikit_fetch_job,
+)
 from trade_trend_kit.config import DEFAULT_CONFIG_PATH, load_config, summarize_config
 from trade_trend_kit.domain.errors import ConfigError
 from trade_trend_kit.domain.models import RuntimeConfig
@@ -37,6 +41,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run the deterministic local fake pipeline instead of real integrations.",
     )
+    fetch_once_parser.add_argument(
+        "--twikit",
+        action="store_true",
+        help="Fetch real X posts through Twikit. Analysis remains fake until the LLM adapter lands.",
+    )
+    fetch_once_parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=Path(".env"),
+        help="Path to environment file with Twikit credentials. Defaults to .env.",
+    )
     validate_parser = subparsers.add_parser("validate-config", help="Validate config/x.json")
     validate_parser.add_argument(
         "--config",
@@ -56,15 +71,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("trade-trend-kit: run mode is not implemented yet.")
         return 0
     if args.command == "fetch-once":
-        if not args.fake:
-            print("trade-trend-kit: fetch-once currently requires --fake until real adapters land.")
+        if args.fake == args.twikit:
+            print("trade-trend-kit: fetch-once requires exactly one mode: --fake or --twikit.")
             return 2
         try:
             config = load_config(args.config)
         except ConfigError as exc:
             print(f"Config invalid: {exc}")
             return 1
-        summary = asyncio.run(_run_fake_fetch_once(config=config, data_dir=args.data_dir))
+        if args.fake:
+            summary = asyncio.run(_run_fake_fetch_once(config=config, data_dir=args.data_dir))
+        else:
+            summary = asyncio.run(
+                _run_twikit_fetch_once(
+                    config=config,
+                    data_dir=args.data_dir,
+                    env_file=args.env_file,
+                )
+            )
         print(format_fetch_cycle_summary(summary))
         return 0
     if args.command == "validate-config":
@@ -84,6 +108,13 @@ async def _run_fake_fetch_once(config: RuntimeConfig, data_dir: Path):
     """Load config and execute one fake cycle behind the synchronous CLI."""
 
     job = build_fake_fetch_job(config=config, data_dir=data_dir)
+    return await job.run_once(config)
+
+
+async def _run_twikit_fetch_once(config: RuntimeConfig, data_dir: Path, env_file: Path):
+    """Load config and execute one Twikit-backed cycle behind the synchronous CLI."""
+
+    job = build_twikit_fetch_job(config=config, data_dir=data_dir, env_file=env_file)
     return await job.run_once(config)
 
 

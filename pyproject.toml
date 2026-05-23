@@ -12,6 +12,7 @@ license = { file = "LICENSE" }
 authors = [{ name = "TreeZhiyuan" }]
 dependencies = [
     "pydantic>=2.7",
+    "twikit>=2.3.3",
     "tzdata>=2024.1",
 ]
 

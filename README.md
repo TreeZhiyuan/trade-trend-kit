@@ -24,14 +24,16 @@ python -m pip install -e .
 ```bash
 python -m trade_trend_kit validate-config
 python -m trade_trend_kit fetch-once --fake
+python -m trade_trend_kit fetch-once --twikit
 python -m trade_trend_kit run
 ```
 
 `fetch-once --fake` runs a deterministic local end-to-end pipeline. It reads
 `config/x.json`, generates fake X posts, saves raw and normalized tweets under
 `data/`, analyzes only newly seen tweets, and writes account/daily reports.
-Real Twikit and OpenAI-compatible adapters will replace the fake adapters in
-later steps.
+`fetch-once --twikit` uses the real Twikit adapter for X collection and still
+keeps the rest of the pipeline local for now. Real OpenAI-compatible analysis
+will replace the fake analyzer in the next step.
 
 ## Dependency Policy
 
