@@ -360,6 +360,8 @@ LLM_BASE_URL=https://api.openai.com/v1
 LLM_API_KEY=
 LLM_MODEL=gpt-4.1-mini
 LLM_TIMEOUT_SECONDS=60
+LLM_TEMPERATURE=0.2
+LLM_MAX_TOKENS=
 
 LOG_LEVEL=INFO
 ```
@@ -580,12 +582,13 @@ Reference: [Twikit documentation](https://twikit.readthedocs.io/en/latest/twikit
 
 ### 12.1 Provider
 
-Use an OpenAI-compatible HTTP client behind the `TweetAnalyzer` port. The MVP can use either:
+Use an OpenAI-compatible HTTP client behind the `TweetAnalyzer` port. The current MVP implementation calls `/chat/completions` through a small stdlib JSON transport so Step 10 adds no new runtime dependency.
 
-- Official OpenAI Python SDK configured with `base_url`, or
+The transport is injectable, so a later iteration can replace it with:
+
+- Official OpenAI Python SDK configured with `base_url`.
 - `httpx` against `/chat/completions`.
-
-The preferred MVP approach is the OpenAI SDK because it supports compatible providers with less custom protocol code.
+- A local-model adapter that still implements `TweetAnalyzer`.
 
 ### 12.2 Prompt Requirements
 
@@ -616,13 +619,14 @@ If no new tweets exist for an account:
 If the LLM returns invalid JSON:
 
 1. Retry once with a JSON repair prompt.
-2. If still invalid, save the raw response to an error file under:
+2. If still invalid, raise `AnalysisError`; the current fetch cycle records the account failure and does not mark tweets analyzed.
+3. A later observability step should save the raw response to an error file under:
 
 ```text
 data/reports/{date}/errors/{market_category_account}_{timestamp}.txt
 ```
 
-3. Do not mark those tweets as analyzed.
+4. Do not mark those tweets as analyzed.
 
 ## 13. Scheduling Design
 
@@ -766,8 +770,8 @@ These fakes make future refactors safer and keep business logic testable without
 
 当前实现状态：
 
-- Step 1 到 Step 9 已完成。
-- 下一步优先推进 Step 10，把 OpenAI-compatible 分析器接入到现有 fake analyzer 替换点。
+- Step 1 到 Step 10 已完成。
+- 下一步优先推进 Step 11，接入 15 分钟调度与持续运行能力。
 
 ### 19.2 Per-step Review Focus
 

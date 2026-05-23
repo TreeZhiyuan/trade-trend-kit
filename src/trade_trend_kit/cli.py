@@ -14,7 +14,7 @@ from trade_trend_kit.app.services import (
     build_twikit_fetch_job,
 )
 from trade_trend_kit.config import DEFAULT_CONFIG_PATH, load_config, summarize_config
-from trade_trend_kit.domain.errors import ConfigError
+from trade_trend_kit.domain.errors import ConfigError, TradeTrendKitError
 from trade_trend_kit.domain.models import RuntimeConfig
 
 
@@ -44,7 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
     fetch_once_parser.add_argument(
         "--twikit",
         action="store_true",
-        help="Fetch real X posts through Twikit. Analysis remains fake until the LLM adapter lands.",
+        help="Fetch real X posts through Twikit.",
+    )
+    fetch_once_parser.add_argument(
+        "--llm",
+        action="store_true",
+        help="Use the OpenAI-compatible analyzer instead of the fake analyzer.",
     )
     fetch_once_parser.add_argument(
         "--env-file",
@@ -76,19 +81,30 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         try:
             config = load_config(args.config)
+            if args.fake:
+                summary = asyncio.run(
+                    _run_fake_fetch_once(
+                        config=config,
+                        data_dir=args.data_dir,
+                        env_file=args.env_file,
+                        use_llm_analyzer=args.llm,
+                    )
+                )
+            else:
+                summary = asyncio.run(
+                    _run_twikit_fetch_once(
+                        config=config,
+                        data_dir=args.data_dir,
+                        env_file=args.env_file,
+                        use_llm_analyzer=args.llm,
+                    )
+                )
         except ConfigError as exc:
             print(f"Config invalid: {exc}")
             return 1
-        if args.fake:
-            summary = asyncio.run(_run_fake_fetch_once(config=config, data_dir=args.data_dir))
-        else:
-            summary = asyncio.run(
-                _run_twikit_fetch_once(
-                    config=config,
-                    data_dir=args.data_dir,
-                    env_file=args.env_file,
-                )
-            )
+        except TradeTrendKitError as exc:
+            print(f"Run failed: {exc}")
+            return 1
         print(format_fetch_cycle_summary(summary))
         return 0
     if args.command == "validate-config":
@@ -104,17 +120,37 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 2
 
 
-async def _run_fake_fetch_once(config: RuntimeConfig, data_dir: Path):
+async def _run_fake_fetch_once(
+    config: RuntimeConfig,
+    data_dir: Path,
+    env_file: Path,
+    use_llm_analyzer: bool,
+):
     """Load config and execute one fake cycle behind the synchronous CLI."""
 
-    job = build_fake_fetch_job(config=config, data_dir=data_dir)
+    job = build_fake_fetch_job(
+        config=config,
+        data_dir=data_dir,
+        env_file=env_file,
+        use_llm_analyzer=use_llm_analyzer,
+    )
     return await job.run_once(config)
 
 
-async def _run_twikit_fetch_once(config: RuntimeConfig, data_dir: Path, env_file: Path):
+async def _run_twikit_fetch_once(
+    config: RuntimeConfig,
+    data_dir: Path,
+    env_file: Path,
+    use_llm_analyzer: bool,
+):
     """Load config and execute one Twikit-backed cycle behind the synchronous CLI."""
 
-    job = build_twikit_fetch_job(config=config, data_dir=data_dir, env_file=env_file)
+    job = build_twikit_fetch_job(
+        config=config,
+        data_dir=data_dir,
+        env_file=env_file,
+        use_llm_analyzer=use_llm_analyzer,
+    )
     return await job.run_once(config)
 
 
