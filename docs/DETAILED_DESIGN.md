@@ -747,6 +747,38 @@ These fakes make future refactors safer and keep business logic testable without
 
 ## 19. Implementation Plan
 
+### 19.1 Step-by-Step Delivery Matrix
+
+| 步骤 | 功能增量 | 主要产物 | Review 重点 |
+| --- | --- | --- | --- |
+| Step 1 | 建立项目骨架、CLI 入口、src 布局 | `pyproject.toml`、`src/trade_trend_kit/`、基础 `README` | 包结构是否清晰，入口是否可扩展，是否避免把业务逻辑塞进入口文件 |
+| Step 2 | 建立领域模型、端口、错误类型 | `domain/models.py`、`domain/ports.py`、`domain/errors.py` | 模型是否稳定、端口是否只表达能力不绑定实现、命名是否可长期复用 |
+| Step 3 | 加载并校验配置 | `config.py`、`config/x.json`、`config/x.example.json`、`validate-config` | 配置校验是否严格、默认值是否合理、错误信息是否可操作 |
+| Step 4 | JSON 本地存储基础设施 | `utils/json_io.py`、`infra/storage/*`、`state.json`、tweet/report 文件落盘 | 文件命名是否满足 `market_category_account`、写入是否原子、重复运行是否幂等 |
+| Step 5 | 端到端 fake 流水线 | `infra/fake/*`、`app/fetch_job.py`、`app/report_job.py`、`fetch-once --fake` | 数据流是否闭环、只分析新增推文是否成立、状态和报告是否会重复写入 |
+| Step 6 | 接入真实 Twikit 适配器 | `infra/x/twikit_client.py` 的真实实现、账号登录/抓取/错误映射 | Twikit 对象是否在边界转换、异常是否归一化、是否只在适配层依赖第三方 SDK |
+| Step 7 | 接入真实 OpenAI-compatible 分析器 | `infra/llm/openai_compatible.py`、`infra/llm/prompts.py` | Prompt 是否约束输出 JSON、是否保留英文摘要、失败重试和坏 JSON 是否可恢复 |
+| Step 8 | 计划任务与持续运行 | `scheduler.py`、`run` 命令、周期执行 | 是否 15 分钟调度、是否避免重叠执行、是否支持配置热重载 |
+| Step 9 | 发布与推送预留 | `infra/publishing/*`、日报导出格式 | 输出是否适合后续推送、字段是否足够稳定、是否便于不同渠道复用 |
+
+当前实现状态：
+
+- Step 1 到 Step 5 已完成。
+- 下一步优先推进 Step 6，先把真实 Twikit 适配器接入到现有 fake 流水线替换点。
+
+### 19.2 Per-step Review Focus
+
+每一步提交前建议按下面几个维度做 Review：
+
+- **边界**：新增代码是否仍然遵守“应用层依赖端口、适配层依赖 SDK”的分层。
+- **幂等**：重复执行是否只补充新增数据，不会覆盖掉历史或重复分析。
+- **可替换**：fake、Twikit、LLM、存储、发布是否都能独立替换。
+- **可测试**：是否能用临时目录和 fake 对象完成单元或端到端测试。
+- **可观测**：失败时是否有足够信息定位到账号、日期、文件或上游响应。
+- **扩展性**：新增账号、市场分类、报告字段或推送渠道时，是否只需要局部改动。
+
+### 19.3 Existing Phase Plan
+
 ### Phase 1: Project Skeleton
 
 - Add `pyproject.toml`.
