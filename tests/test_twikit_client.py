@@ -27,7 +27,7 @@ class FakeTwikitClient:
         self.tweets = [
             SimpleNamespace(
                 id="t1",
-                full_text="Fed and liquidity matter.",
+                full_text="Fed\n liquidity   matter.",
                 created_at_datetime=datetime(2026, 5, 23, 9, 0, tzinfo=PROJECT_TZ),
                 lang="en",
                 reply_count=1,
@@ -99,7 +99,7 @@ def test_twikit_client_loads_cookies_and_fetches_tweets(tmp_path: Path) -> None:
     assert client.tweet_calls == [("123", "Tweets", 1)]
     assert result.user.user_id == "123"
     assert result.normalized_tweets[0].tweet_id == "t1"
-    assert result.normalized_tweets[0].text == "Fed and liquidity matter."
+    assert result.normalized_tweets[0].text == "Fed liquidity matter."
 
 
 def test_twikit_client_logs_in_when_cookies_missing(tmp_path: Path) -> None:

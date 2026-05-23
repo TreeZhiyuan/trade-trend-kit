@@ -12,15 +12,16 @@ from datetime import UTC, datetime, timedelta
 
 from trade_trend_kit.domain.models import (
     AccountConfig,
-    AccountMeta,
     FetchResult,
-    NormalizedTweet,
-    RawTweet,
     RawTweetBatch,
-    TweetMetrics,
     XUser,
 )
 from trade_trend_kit.domain.ports import XPostClient
+from trade_trend_kit.infra.x.normalizer import (
+    XRawPost,
+    build_raw_tweets,
+    normalize_x_posts,
+)
 from trade_trend_kit.utils.time import DEFAULT_TIMEZONE, now_in_timezone
 
 
@@ -46,8 +47,7 @@ class FakeXPostClient(XPostClient):
             account=account.account,
             display_name=account.display_name or account.account,
         )
-        raw_tweets: list[RawTweet] = []
-        normalized_tweets: list[NormalizedTweet] = []
+        posts: list[XRawPost] = []
 
         for index in range(limit):
             tweet_id = _stable_id(
@@ -61,11 +61,17 @@ class FakeXPostClient(XPostClient):
             text = _fake_tweet_text(account, index)
             url = f"https://x.com/{account.account}/status/{tweet_id}"
 
-            raw_tweets.append(
-                RawTweet(
+            posts.append(
+                XRawPost(
                     tweet_id=tweet_id,
-                    user_id=user.user_id,
-                    account=account.account,
+                    text=text,
+                    created_at=created_at,
+                    lang="en",
+                    url=url,
+                    reply_count=index,
+                    retweet_count=index * 2,
+                    favorite_count=10 + index * 3,
+                    view_count=1_000 + index * 137,
                     payload={
                         "id": tweet_id,
                         "text": text,
@@ -73,31 +79,18 @@ class FakeXPostClient(XPostClient):
                         "url": url,
                         "source": "fake",
                     },
-                    fetched_at=fetched_at,
-                )
-            )
-            normalized_tweets.append(
-                NormalizedTweet(
-                    tweet_id=tweet_id,
-                    account=account.account,
-                    display_name=user.display_name,
-                    user_id=user.user_id,
-                    created_at=created_at,
-                    text=text,
-                    english_summary=f"Fake summary for @{account.account}: {text[:96]}",
-                    lang="en",
-                    url=url,
-                    metrics=TweetMetrics(
-                        reply_count=index,
-                        retweet_count=index * 2,
-                        favorite_count=10 + index * 3,
-                        view_count=1_000 + index * 137,
-                    ),
-                    account_meta=AccountMeta.from_account_config(account),
-                    fetched_at=fetched_at,
                 )
             )
 
+        raw_tweets = build_raw_tweets(posts, account, user, fetched_at)
+        normalized_tweets = normalize_x_posts(
+            posts,
+            account=account,
+            user=user,
+            fetched_at=fetched_at,
+            timezone=self.timezone,
+            english_summary_prefix="Fake summary for",
+        )
         raw_batch = RawTweetBatch(
             account=account,
             user=user,

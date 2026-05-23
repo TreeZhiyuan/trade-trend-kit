@@ -9,24 +9,24 @@ from __future__ import annotations
 import inspect
 import os
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from trade_trend_kit.domain.errors import AuthenticationError, RateLimitError, XClientError
 from trade_trend_kit.domain.models import (
     AccountConfig,
-    AccountMeta,
     FetchResult,
-    NormalizedTweet,
-    RawTweet,
     RawTweetBatch,
-    TweetMetrics,
     XUser,
 )
 from trade_trend_kit.domain.ports import XPostClient
+from trade_trend_kit.infra.x.normalizer import (
+    build_raw_tweets,
+    normalize_x_posts,
+    twikit_tweet_to_raw_post,
+)
 from trade_trend_kit.utils.env import load_env_file
-from trade_trend_kit.utils.time import DEFAULT_TIMEZONE, to_timezone
+from trade_trend_kit.utils.time import DEFAULT_TIMEZONE, now_in_timezone
 
 DEFAULT_COOKIES_PATH = Path("data/runtime/cookies.json")
 TWEET_PRODUCT = "Tweets"
@@ -89,23 +89,17 @@ class TwikitXPostClient(XPostClient):
         except Exception as exc:  # noqa: BLE001 - normalize SDK-specific exceptions.
             raise _map_twikit_error(exc, f"Failed to fetch @{account.account}") from exc
 
-        fetched_at = to_timezone(datetime.now().astimezone(), self.settings.timezone)
+        fetched_at = now_in_timezone(self.settings.timezone)
         user = _to_x_user(user_obj, account)
-        tweet_items = list(twikit_tweets)[:limit]
-        raw_tweets = [
-            _to_raw_tweet(tweet=tweet, user=user, account=account, fetched_at=fetched_at)
-            for tweet in tweet_items
-        ]
-        normalized_tweets = [
-            _to_normalized_tweet(
-                tweet=tweet,
-                user=user,
-                account=account,
-                fetched_at=fetched_at,
-                timezone=self.settings.timezone,
-            )
-            for tweet in tweet_items
-        ]
+        tweet_items = [twikit_tweet_to_raw_post(tweet) for tweet in list(twikit_tweets)[:limit]]
+        raw_tweets = build_raw_tweets(tweet_items, account, user, fetched_at)
+        normalized_tweets = normalize_x_posts(
+            tweet_items,
+            account=account,
+            user=user,
+            fetched_at=fetched_at,
+            timezone=self.settings.timezone,
+        )
         raw_batch = RawTweetBatch(
             account=account,
             user=user,
@@ -207,89 +201,6 @@ async def _fetch_user_tweets(client: Any, user_obj: Any, limit: int) -> Any:
     if hasattr(user_obj, "get_tweets"):
         return await _maybe_await(user_obj.get_tweets(TWEET_PRODUCT, count=limit))
     raise XClientError("Twikit client cannot fetch user tweets.")
-
-
-def _to_raw_tweet(
-    tweet: Any,
-    user: XUser,
-    account: AccountConfig,
-    fetched_at: datetime,
-) -> RawTweet:
-    tweet_id = _required_str(_obj_value(tweet, "id"), "Tweet id")
-    return RawTweet(
-        tweet_id=tweet_id,
-        user_id=user.user_id,
-        account=account.account,
-        payload=_tweet_payload(tweet),
-        fetched_at=fetched_at,
-    )
-
-
-def _to_normalized_tweet(
-    tweet: Any,
-    user: XUser,
-    account: AccountConfig,
-    fetched_at: datetime,
-    timezone: str,
-) -> NormalizedTweet:
-    created_at = _tweet_created_at(tweet, timezone)
-    tweet_id = _required_str(_obj_value(tweet, "id"), "Tweet id")
-    return NormalizedTweet(
-        tweet_id=tweet_id,
-        account=account.account,
-        display_name=user.display_name,
-        user_id=user.user_id,
-        created_at=created_at,
-        text=str(_obj_value(tweet, "full_text") or _obj_value(tweet, "text") or ""),
-        english_summary=None,
-        lang=_optional_str(_obj_value(tweet, "lang")),
-        url=_tweet_url(tweet, account.account, tweet_id),
-        metrics=TweetMetrics(
-            reply_count=_optional_int(_obj_value(tweet, "reply_count")),
-            retweet_count=_optional_int(_obj_value(tweet, "retweet_count")),
-            favorite_count=_optional_int(_obj_value(tweet, "favorite_count")),
-            view_count=_optional_int(_obj_value(tweet, "view_count")),
-        ),
-        account_meta=AccountMeta.from_account_config(account),
-        fetched_at=fetched_at,
-    )
-
-
-def _tweet_created_at(tweet: Any, timezone: str) -> datetime:
-    value = _obj_value(tweet, "created_at_datetime") or _obj_value(tweet, "created_at")
-    if isinstance(value, datetime):
-        return to_timezone(value, timezone)
-    if isinstance(value, str):
-        try:
-            return to_timezone(datetime.fromisoformat(value.replace("Z", "+00:00")), timezone)
-        except ValueError:
-            pass
-    return to_timezone(datetime.now().astimezone(), timezone)
-
-
-def _tweet_url(tweet: Any, account: str, tweet_id: str) -> str:
-    return str(_obj_value(tweet, "url") or f"https://x.com/{account}/status/{tweet_id}")
-
-
-def _tweet_payload(tweet: Any) -> dict[str, Any]:
-    payload: dict[str, Any] = {}
-    for name in (
-        "id",
-        "text",
-        "full_text",
-        "created_at",
-        "lang",
-        "reply_count",
-        "retweet_count",
-        "favorite_count",
-        "view_count",
-        "url",
-    ):
-        value = _obj_value(tweet, name)
-        if value is None:
-            continue
-        payload[name] = value.isoformat() if isinstance(value, datetime) else value
-    return payload
 
 
 def _obj_value(obj: Any, name: str) -> Any:
