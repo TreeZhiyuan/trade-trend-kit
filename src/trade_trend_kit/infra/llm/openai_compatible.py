@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import urllib.error
 import urllib.request
@@ -15,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from pydantic import ValidationError
@@ -28,6 +30,7 @@ from trade_trend_kit.domain.models import (
     NormalizedTweet,
 )
 from trade_trend_kit.domain.ports import TweetAnalyzer
+from trade_trend_kit.infra.llm.error_archive import LLMErrorArchive, LLMErrorArchiveRecord
 from trade_trend_kit.infra.llm.prompts import (
     build_account_analysis_messages,
     build_json_repair_messages,
@@ -42,6 +45,7 @@ DEFAULT_LLM_TEMPERATURE = 0.2
 
 JsonObject = dict[str, Any]
 LLMTransport = Callable[[str, dict[str, str], JsonObject, float], JsonObject]
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -107,11 +111,13 @@ class OpenAICompatibleAnalyzer(TweetAnalyzer):
         settings: OpenAICompatibleSettings,
         transport: LLMTransport | None = None,
         clock: Callable[[str], datetime] | None = None,
+        error_archive: LLMErrorArchive | None = None,
     ) -> None:
         settings.validate()
         self.settings = settings
         self.transport = transport or _urllib_json_transport
         self.clock = clock or now_in_timezone
+        self.error_archive = error_archive
 
     async def analyze_account_tweets(
         self,
@@ -120,33 +126,78 @@ class OpenAICompatibleAnalyzer(TweetAnalyzer):
     ) -> AccountIncrementalReport:
         """Analyze only the incremental tweets selected by application services."""
 
+        started_at = perf_counter()
+        LOGGER.info(
+            "LLM analysis started: account=%s tweet_count=%s model=%s",
+            account.account,
+            len(tweets),
+            self.settings.model,
+        )
         messages = build_account_analysis_messages(
             account=account,
             tweets=tweets,
             language=self.settings.language,
             preserve_english_summary=self.settings.preserve_english_summary,
         )
-        raw_response = await asyncio.to_thread(self._chat_completion, messages)
-        raw_content = _extract_message_content(raw_response)
+
+        try:
+            raw_response = await asyncio.to_thread(self._chat_completion, messages)
+            raw_content = _extract_message_content(raw_response)
+        except AnalysisError:
+            LOGGER.exception(
+                "LLM analysis failed before parsing response: account=%s tweet_count=%s",
+                account.account,
+                len(tweets),
+            )
+            raise
 
         try:
             parsed_response = _parse_json_object(raw_content)
         except AnalysisError:
-            repaired_response = await asyncio.to_thread(
-                self._chat_completion,
-                build_json_repair_messages(raw_content),
+            LOGGER.warning(
+                "LLM returned invalid JSON; attempting one repair: account=%s tweet_count=%s",
+                account.account,
+                len(tweets),
             )
-            repaired_content = _extract_message_content(repaired_response)
-            parsed_response = _parse_json_object(repaired_content)
+            repaired_content = ""
+            try:
+                repaired_response = await asyncio.to_thread(
+                    self._chat_completion,
+                    build_json_repair_messages(raw_content),
+                )
+                repaired_content = _extract_message_content(repaired_response)
+                parsed_response = _parse_json_object(repaired_content)
+            except AnalysisError as repair_error:
+                archive_path = self._archive_invalid_json_response(
+                    account=account,
+                    tweets=tweets,
+                    raw_content=raw_content,
+                    repair_content=repaired_content,
+                    error=repair_error,
+                )
+                archive_hint = f" Archived at: {archive_path}" if archive_path else ""
+                raise AnalysisError(
+                    f"LLM returned invalid JSON after repair for @{account.account}."
+                    f"{archive_hint}"
+                ) from repair_error
 
         created_at = self.clock(self.settings.timezone)
-        return _build_account_report(
+        report = _build_account_report(
             account=account,
             tweets=tweets,
             response=parsed_response,
             created_at=created_at,
             timezone=self.settings.timezone,
         )
+        duration_ms = int((perf_counter() - started_at) * 1000)
+        LOGGER.info(
+            "LLM analysis finished: account=%s tweet_count=%s report_id=%s duration_ms=%s",
+            account.account,
+            len(tweets),
+            report.report_id,
+            duration_ms,
+        )
+        return report
 
     def _chat_completion(self, messages: list[dict[str, str]]) -> JsonObject:
         payload: JsonObject = {
@@ -163,12 +214,70 @@ class OpenAICompatibleAnalyzer(TweetAnalyzer):
             "Content-Type": "application/json",
         }
         url = f"{self.settings.base_url.rstrip('/')}/chat/completions"
+        started_at = perf_counter()
         try:
-            return self.transport(url, headers, payload, self.settings.timeout_seconds)
+            response = self.transport(url, headers, payload, self.settings.timeout_seconds)
+            duration_ms = int((perf_counter() - started_at) * 1000)
+            LOGGER.info(
+                "LLM chat completion request finished: model=%s duration_ms=%s",
+                self.settings.model,
+                duration_ms,
+            )
+            return response
         except AnalysisError:
+            duration_ms = int((perf_counter() - started_at) * 1000)
+            LOGGER.warning(
+                "LLM chat completion request failed: model=%s duration_ms=%s",
+                self.settings.model,
+                duration_ms,
+            )
             raise
         except Exception as exc:  # noqa: BLE001 - normalize provider/transport failures.
+            duration_ms = int((perf_counter() - started_at) * 1000)
+            LOGGER.warning(
+                "LLM chat completion request failed: model=%s duration_ms=%s",
+                self.settings.model,
+                duration_ms,
+            )
             raise AnalysisError(f"LLM request failed: {exc}") from exc
+
+    def _archive_invalid_json_response(
+        self,
+        account: AccountConfig,
+        tweets: list[NormalizedTweet],
+        raw_content: str,
+        repair_content: str,
+        error: AnalysisError,
+    ) -> Path | None:
+        if self.error_archive is None:
+            LOGGER.warning(
+                "LLM invalid JSON archive skipped because no archive backend is configured: "
+                "account=%s",
+                account.account,
+            )
+            return None
+
+        created_at = self.clock(self.settings.timezone)
+        path = self.error_archive.save(
+            LLMErrorArchiveRecord(
+                account=account,
+                source_tweet_ids=[tweet.tweet_id for tweet in tweets],
+                stage="json_repair_failed",
+                error_message=str(error),
+                raw_response=raw_content,
+                repair_response=repair_content,
+                created_at=created_at,
+                timezone=self.settings.timezone,
+                model=self.settings.model,
+            )
+        )
+        LOGGER.error(
+            "Archived invalid LLM response: account=%s tweet_count=%s path=%s",
+            account.account,
+            len(tweets),
+            path,
+        )
+        return path
 
 
 def _urllib_json_transport(

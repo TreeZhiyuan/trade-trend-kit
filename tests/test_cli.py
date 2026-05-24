@@ -32,6 +32,10 @@ def test_cli_parser_accepts_fake_fetch_once_options() -> None:
             "runtime-data",
             "--env-file",
             ".env.local",
+            "--log-level",
+            "WARNING",
+            "--log-file",
+            "logs/fetch-once.log",
         ]
     )
 
@@ -41,6 +45,8 @@ def test_cli_parser_accepts_fake_fetch_once_options() -> None:
     assert args.config == Path("custom.json")
     assert args.data_dir == Path("runtime-data")
     assert args.env_file == Path(".env.local")
+    assert args.log_level == "WARNING"
+    assert args.log_file == Path("logs/fetch-once.log")
 
 
 def test_cli_parser_accepts_run_options() -> None:
@@ -59,6 +65,8 @@ def test_cli_parser_accepts_run_options() -> None:
             ".env.local",
             "--log-level",
             "DEBUG",
+            "--log-file",
+            "logs/run.log",
         ]
     )
 
@@ -69,6 +77,7 @@ def test_cli_parser_accepts_run_options() -> None:
     assert args.data_dir == Path("runtime-data")
     assert args.env_file == Path(".env.local")
     assert args.log_level == "DEBUG"
+    assert args.log_file == Path("logs/run.log")
 
 
 def test_validate_config_command_returns_zero_for_valid_config(tmp_path: Path) -> None:

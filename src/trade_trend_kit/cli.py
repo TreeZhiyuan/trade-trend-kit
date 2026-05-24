@@ -18,6 +18,7 @@ from trade_trend_kit.domain.errors import ConfigError, TradeTrendKitError
 from trade_trend_kit.domain.models import RuntimeConfig
 from trade_trend_kit.logging_config import configure_logging
 from trade_trend_kit.scheduler import ScheduledRunSettings, run_scheduled_collector
+from trade_trend_kit.utils.env import load_env_file
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -64,6 +65,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Override LOG_LEVEL for console logging.",
     )
+    run_parser.add_argument(
+        "--log-file",
+        type=Path,
+        default=None,
+        help="Write logs to this file in addition to stderr.",
+    )
     fetch_once_parser = subparsers.add_parser("fetch-once", help="Run one collection cycle")
     fetch_once_parser.add_argument(
         "--config",
@@ -98,6 +105,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path(".env"),
         help="Path to environment file with Twikit credentials. Defaults to .env.",
     )
+    fetch_once_parser.add_argument(
+        "--log-level",
+        type=str,
+        default=None,
+        help="Override LOG_LEVEL for console logging.",
+    )
+    fetch_once_parser.add_argument(
+        "--log-file",
+        type=Path,
+        default=None,
+        help="Write logs to this file in addition to stderr.",
+    )
     validate_parser = subparsers.add_parser("validate-config", help="Validate config/x.json")
     validate_parser.add_argument(
         "--config",
@@ -114,7 +133,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "run":
-        configure_logging(args.log_level)
+        load_env_file(args.env_file)
+        configure_logging(args.log_level, args.log_file)
         if args.fake == args.twikit:
             print("trade-trend-kit: run requires exactly one mode: --fake or --twikit.")
             return 2
@@ -134,6 +154,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         return 0
     if args.command == "fetch-once":
+        load_env_file(args.env_file)
+        configure_logging(args.log_level, args.log_file)
         if args.fake == args.twikit:
             print("trade-trend-kit: fetch-once requires exactly one mode: --fake or --twikit.")
             return 2

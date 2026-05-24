@@ -7,6 +7,7 @@ without changing the application layer.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from trade_trend_kit.utils.report_rendering import (
 )
 
 DEFAULT_REPORTS_DIR = Path("data/reports")
+LOGGER = logging.getLogger(__name__)
 
 
 class JsonReportRepository(ReportRepository):
@@ -42,6 +44,13 @@ class JsonReportRepository(ReportRepository):
         self._write_archive(paths.archive_json, payload)
         self._write_archive_text(paths.archive_markdown, markdown)
         self._write_history(paths.history_json, payload, key_field="report_id")
+        LOGGER.info(
+            "Account report files saved: account=%s date=%s latest_json=%s archive_json=%s",
+            report.account,
+            report.date,
+            paths.latest_json,
+            paths.archive_json,
+        )
 
     async def save_daily_report(self, report: DailyReport) -> None:
         """Persist the current daily aggregate snapshot and append history."""
@@ -57,6 +66,14 @@ class JsonReportRepository(ReportRepository):
         self._write_archive_text(paths.archive_markdown, markdown)
         self._write_history(paths.history_json, payload, key_field="updated_at")
         self._write_publish_payload(publish_paths, publish_payload)
+        LOGGER.info(
+            "Daily report files saved: date=%s latest_json=%s archive_json=%s "
+            "publish_json=%s",
+            report.date,
+            paths.latest_json,
+            paths.archive_json,
+            publish_paths.latest_json,
+        )
 
     def _account_report_paths(
         self,

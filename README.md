@@ -26,6 +26,7 @@ python -m trade_trend_kit validate-config
 python -m trade_trend_kit fetch-once --fake
 python -m trade_trend_kit fetch-once --twikit
 python -m trade_trend_kit fetch-once --twikit --llm
+python -m trade_trend_kit fetch-once --fake --log-file logs/fetch-once.log
 python -m trade_trend_kit run --fake
 python -m trade_trend_kit run --twikit --llm
 ```
@@ -42,10 +43,19 @@ scheduler uses `fetch_interval_minutes` from `config/x.json`, runs one cycle
 immediately by default, reloads config before each cycle, and prevents
 overlapping scheduled runs.
 
+Use `--log-level` and `--log-file` on `fetch-once` or `run` for local
+diagnostics. The same values can also be configured with `LOG_LEVEL` and
+`LOG_FILE` in `.env`.
+
 Daily reports are also exported as push-ready payloads under
 `data/reports/{date}/publish/`. The project writes structured JSON, Markdown,
 and plain text so later social-platform or app publishers can consume reports
 without reparsing the report archive.
+
+If the LLM returns invalid JSON and the repair attempt also fails, the raw and
+repaired model text is archived under `data/reports/{date}/errors/` with account
+metadata and source tweet IDs. The archive intentionally excludes API keys,
+cookies, and request headers.
 
 ## Real Adapter Setup
 

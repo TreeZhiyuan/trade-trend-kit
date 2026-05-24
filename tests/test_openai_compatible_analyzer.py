@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -14,6 +15,8 @@ from trade_trend_kit.infra.llm.openai_compatible import (
     OpenAICompatibleAnalyzer,
     OpenAICompatibleSettings,
 )
+from trade_trend_kit.infra.llm.error_archive import JsonLLMErrorArchive
+from trade_trend_kit.utils.json_io import read_json_file
 
 PROJECT_TZ = ZoneInfo("Asia/Shanghai")
 
@@ -191,9 +194,13 @@ def test_openai_compatible_analyzer_requires_api_key() -> None:
         OpenAICompatibleAnalyzer(settings=settings)
 
 
-def test_openai_compatible_analyzer_raises_after_failed_repair() -> None:
+def test_openai_compatible_analyzer_archives_failed_json_repair(tmp_path: Path) -> None:
     account = make_account()
     tweet = make_tweet(account)
+    responses = [
+        completion_with_content("not-json"),
+        completion_with_content("still not json"),
+    ]
 
     def transport(
         _: str,
@@ -201,13 +208,24 @@ def test_openai_compatible_analyzer_raises_after_failed_repair() -> None:
         ___: dict[str, Any],
         ____: float,
     ) -> dict[str, Any]:
-        return completion_with_content("still not json")
+        return responses.pop(0)
 
     analyzer = OpenAICompatibleAnalyzer(
         settings=make_settings(),
         transport=transport,
         clock=fixed_clock,
+        error_archive=JsonLLMErrorArchive(tmp_path / "reports"),
     )
 
-    with pytest.raises(AnalysisError, match="invalid JSON"):
+    with pytest.raises(AnalysisError, match="Archived at"):
         asyncio.run(analyzer.analyze_account_tweets(account, [tweet]))
+
+    archive_paths = list((tmp_path / "reports" / "2026-05-23" / "errors").glob("*.json"))
+    assert len(archive_paths) == 1
+    archive = read_json_file(archive_paths[0])
+    assert archive["stage"] == "json_repair_failed"
+    assert archive["account"]["account"] == "macro_blogger"
+    assert archive["source_tweet_ids"] == ["tweet-1"]
+    assert archive["raw_response"] == "not-json"
+    assert archive["repair_response"] == "still not json"
+    assert "test-key" not in json.dumps(archive)

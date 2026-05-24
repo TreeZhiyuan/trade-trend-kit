@@ -143,6 +143,7 @@ src/trade_trend_kit/
       twikit_client.py
     llm/
       __init__.py
+      error_archive.py
       openai_compatible.py
       prompts.py
     storage/
@@ -368,6 +369,7 @@ LLM_TEMPERATURE=0.2
 LLM_MAX_TOKENS=
 
 LOG_LEVEL=INFO
+LOG_FILE=logs/trade-trend-kit.log
 ```
 
 The implementation should support cookie-only mode after the first successful login.
@@ -401,6 +403,8 @@ data/
         publish_payload.txt
         publish_payload.history.json
         archive/
+      errors/
+        us_stock_macro_example_user_20260522223100000000_123_json_repair_failed.json
   runtime/
     cookies.json
     state.json
@@ -627,13 +631,14 @@ If the LLM returns invalid JSON:
 
 1. Retry once with a JSON repair prompt.
 2. If still invalid, raise `AnalysisError`; the current fetch cycle records the account failure and does not mark tweets analyzed.
-3. A later observability step should save the raw response to an error file under:
+3. Save the raw response and repair response to an error archive file under:
 
 ```text
-data/reports/{date}/errors/{market_category_account}_{timestamp}.txt
+data/reports/{date}/errors/{market_category_account}_{timestamp}_{tweet_ids}_{stage}.json
 ```
 
-4. Do not mark those tweets as analyzed.
+4. Do not include API keys, cookies, request headers, or passwords in the archive.
+5. Do not mark those tweets as analyzed.
 
 ## 13. Scheduling Design
 
@@ -677,12 +682,15 @@ trade-trend-kit validate-config
 | Account not found | Mark account error and continue. |
 | No new tweets | Skip LLM call. |
 | LLM timeout | Save error, do not mark tweets analyzed. |
-| Invalid LLM JSON | Retry once, raise `AnalysisError`, record account failure, and do not mark tweets analyzed. Raw response file export is planned for Step 14. |
+| Invalid LLM JSON | Retry once, archive raw and repair responses, raise `AnalysisError`, record account failure, and do not mark tweets analyzed. |
 | File write failure | Log critical error and keep state unchanged for affected account. |
 
 ## 15. Logging and Observability
 
-The current implementation initializes console logging from `LOG_LEVEL`. File logging and more structured per-account events are planned for Step 14.
+The current implementation initializes console logging from `LOG_LEVEL` and can
+also write to `LOG_FILE` or the CLI `--log-file` option. Logging is configured
+by the `run` and `fetch-once` commands after loading the selected `.env` file,
+so local diagnostics can be controlled without code changes.
 
 Important log events:
 
@@ -692,14 +700,27 @@ Important log events:
 - Number of tweets fetched.
 - Number of new tweets detected.
 - LLM call start/end.
+- LLM chat/completions request duration.
+- LLM invalid JSON repair attempt and archive path.
 - Report files written.
 - Rate limit and authentication failures.
+- Fetch cycle duration and summary.
 
 Do not log:
 
 - Passwords.
 - API keys.
 - Full cookies.
+- Full request headers.
+
+Step 14 implementation details:
+
+- `logging_config.configure_logging` supports console logging plus optional file logging.
+- `fetch-once` and `run` accept `--log-level` and `--log-file`.
+- `FetchAndAnalyzeJob` logs cycle start/end, per-account fetch/analyze events, skips, failures, and daily report writes.
+- `JsonReportRepository` logs report and publish payload paths after successful writes.
+- `OpenAICompatibleAnalyzer` logs analysis lifecycle, request duration, repair attempts, and archive paths.
+- `JsonLLMErrorArchive` writes invalid response records to `data/reports/{date}/errors/`.
 
 ## 16. Security and Compliance Notes
 
@@ -752,7 +773,7 @@ Recommended test levels:
 - **Adapter tests**: test JSON repositories against temporary directories.
 - **Integration tests**: optional Twikit and LLM tests gated by environment variables so normal CI does not require real credentials.
 
-Current automated suite covers CLI parsing, config validation, domain models, fake end-to-end pipeline, incremental selection, OpenAI-compatible parsing/repair, publish payload generation, Markdown rendering, scheduler behavior, JSON storage, tweet normalization, and Twikit adapter boundary behavior.
+Current automated suite covers CLI parsing, config validation, domain models, fake end-to-end pipeline, incremental selection, OpenAI-compatible parsing/repair/error archiving, publish payload generation, Markdown rendering, scheduler behavior, JSON storage, tweet normalization, logging setup, and Twikit adapter boundary behavior.
 
 The first implementation should include fakes for key ports:
 
@@ -796,8 +817,8 @@ These fakes make future refactors safer and keep business logic testable without
 
 当前实现状态：
 
-- Step 1 到 Step 13 已完成。
-- MVP 主链路已经具备本地配置、Twikit/fake 抓取、增量分析、报告归档、调度运行和推送预留输出。
+- Step 1 到 Step 14 已完成。
+- MVP 主链路已经具备本地配置、Twikit/fake 抓取、增量分析、报告归档、调度运行、推送预留输出、关键日志和 LLM 错误归档。
 
 ### 19.2 Per-step Review Focus
 
@@ -875,6 +896,8 @@ These fakes make future refactors safer and keep business logic testable without
 - Daily report files are updated under `data/reports/{date}`.
 - Push-ready payload files are updated under `data/reports/{date}/publish`.
 - The scheduler runs every 15 minutes without overlapping jobs.
+- `fetch-once` and `run` can write local diagnostics through `--log-file` or `LOG_FILE`.
+- Invalid LLM JSON responses are archived under `data/reports/{date}/errors/` without marking tweets analyzed.
 - Secrets and runtime files are ignored by git.
 - Application services can be tested without Twikit, real files, or real LLM calls.
 - Twikit, JSON storage, LLM analysis, and publishing are replaceable through ports/adapters.
@@ -889,8 +912,7 @@ These fakes make future refactors safer and keep business logic testable without
 | Should daily reports be regenerated after every incremental account report, or only at a fixed end-of-day time? | Current implementation regenerates the daily report after each cycle that produces at least one account report. |
 | Should `priority` influence analysis order only, or also future push ranking? | Current implementation uses lower `priority` for account processing order. Future push ranking remains open. |
 
-## 22. Backlog After Step 13
+## 22. Backlog After Step 14
 
-- Step 14: Add richer observability, optional file logging, per-account lifecycle logs, LLM call timing, report write logs, and raw LLM error-response archives.
 - Step 15: Add gated real integration tests for Twikit and OpenAI-compatible providers, plus first-run login/cookie reuse documentation.
 - Future: Decide retweet/reply/quote handling policy and whether `priority` should affect push ranking.

@@ -16,6 +16,7 @@ from trade_trend_kit.domain.models import RuntimeConfig
 from trade_trend_kit.domain.ports import TweetAnalyzer
 from trade_trend_kit.infra.fake.analyzer import FakeTweetAnalyzer
 from trade_trend_kit.infra.fake.x_client import FakeXPostClient
+from trade_trend_kit.infra.llm.error_archive import JsonLLMErrorArchive
 from trade_trend_kit.infra.llm.openai_compatible import (
     OpenAICompatibleAnalyzer,
     OpenAICompatibleSettings,
@@ -39,6 +40,7 @@ def build_fake_fetch_job(
     """Build a full local pipeline using deterministic fake integrations."""
 
     root = Path(data_dir)
+    reports_dir = root / "reports"
     job_clock = clock or now_in_timezone
     fixed_now = job_clock(config.timezone)
     return FetchAndAnalyzeJob(
@@ -55,8 +57,9 @@ def build_fake_fetch_job(
             use_llm_analyzer=use_llm_analyzer,
             clock=job_clock,
             fixed_now=fixed_now,
+            reports_dir=reports_dir,
         ),
-        report_repository=JsonReportRepository(root / "reports"),
+        report_repository=JsonReportRepository(reports_dir),
         clock=job_clock,
     )
 
@@ -71,6 +74,7 @@ def build_twikit_fetch_job(
     """Build a pipeline that fetches real X posts through Twikit."""
 
     root = Path(data_dir)
+    reports_dir = root / "reports"
     job_clock = clock or now_in_timezone
     fixed_now = job_clock(config.timezone)
     twikit_settings = TwikitSettings.from_env(
@@ -92,8 +96,9 @@ def build_twikit_fetch_job(
             use_llm_analyzer=use_llm_analyzer,
             clock=job_clock,
             fixed_now=fixed_now,
+            reports_dir=reports_dir,
         ),
-        report_repository=JsonReportRepository(root / "reports"),
+        report_repository=JsonReportRepository(reports_dir),
         clock=job_clock,
     )
 
@@ -104,6 +109,7 @@ def _build_tweet_analyzer(
     use_llm_analyzer: bool,
     clock: Callable[[str], datetime],
     fixed_now: datetime,
+    reports_dir: Path,
 ) -> TweetAnalyzer:
     """Choose the analysis adapter without leaking provider details to the CLI."""
 
@@ -114,5 +120,9 @@ def _build_tweet_analyzer(
             language=config.analysis_language,
             preserve_english_summary=config.preserve_english_summary,
         )
-        return OpenAICompatibleAnalyzer(settings=settings, clock=clock)
+        return OpenAICompatibleAnalyzer(
+            settings=settings,
+            clock=clock,
+            error_archive=JsonLLMErrorArchive(reports_dir),
+        )
     return FakeTweetAnalyzer(timezone=config.timezone, fixed_now=fixed_now)
