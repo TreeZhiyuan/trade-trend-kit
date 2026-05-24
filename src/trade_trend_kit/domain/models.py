@@ -276,6 +276,34 @@ class DailyReport(DomainModel):
     updated_at: datetime
 
 
+class PublishSection(DomainModel):
+    """Structured section prepared for app feeds or rich social cards."""
+
+    heading: str
+    body: str | None = None
+    items: list[str] = Field(default_factory=list)
+
+
+class PublishPayload(DomainModel):
+    """Push-ready daily report payload shared by future delivery channels."""
+
+    payload_id: str
+    report_date: str
+    timezone: str
+    title: str
+    summary: str
+    markdown_body: str
+    plain_text_body: str
+    sections: list[PublishSection] = Field(default_factory=list)
+    hashtags: list[str] = Field(default_factory=list)
+    source_accounts: list[str] = Field(default_factory=list)
+    source_tweet_ids: list[str] = Field(default_factory=list)
+    candidate_symbols: list[DailyCandidateSymbol] = Field(default_factory=list)
+    risk_events: list[str] = Field(default_factory=list)
+    disclaimer: str
+    created_at: datetime
+
+
 class PublishResult(DomainModel):
     """Result returned by future report publishers."""
 

@@ -702,13 +702,23 @@ Do not log:
 
 ## 17. Future Push Service Integration
 
-The MVP should not send reports, but report storage should be push-friendly. Publishing should be represented by a `ReportPublisher` port from the beginning, with `NoopPublisher` as the MVP adapter.
+The MVP should not send reports, but report storage should be push-friendly. Publishing is represented by a `ReportPublisher` port, a channel-neutral `PublishPayload`, and `NoopReportPublisher` as the MVP adapter.
+
+Current push-ready files:
+
+```text
+data/reports/{date}/publish/publish_payload.json
+data/reports/{date}/publish/publish_payload.md
+data/reports/{date}/publish/publish_payload.txt
+data/reports/{date}/publish/publish_payload.history.json
+data/reports/{date}/publish/archive/*
+```
 
 Recommended future push interface:
 
 ```python
 class ReportPublisher:
-    async def publish_daily_report(self, report: DailyReport) -> PublishResult:
+    async def publish_daily_report(self, payload: PublishPayload) -> PublishResult:
         ...
 ```
 
@@ -722,7 +732,7 @@ Future channels may include:
 - Mobile app backend API.
 - Social platform scheduled posting.
 
-To support these channels, Markdown reports should be concise, structured, and include source links where possible.
+To support these channels, publish payloads include structured sections, Markdown, plain text, hashtags, source accounts, source tweet IDs, candidate symbols, risks, and a disclaimer.
 
 ## 18. Testability Strategy
 
@@ -774,8 +784,8 @@ These fakes make future refactors safer and keep business logic testable without
 
 当前实现状态：
 
-- Step 1 到 Step 11 已完成。
-- 下一步优先推进 Step 12，补齐发布与推送预留输出。
+- Step 1 到 Step 12 已完成。
+- MVP 主链路已经具备本地配置、Twikit/fake 抓取、增量分析、报告归档、调度运行和推送预留输出。
 
 ### 19.2 Per-step Review Focus
 

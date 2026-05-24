@@ -42,6 +42,11 @@ scheduler uses `fetch_interval_minutes` from `config/x.json`, runs one cycle
 immediately by default, reloads config before each cycle, and prevents
 overlapping scheduled runs.
 
+Daily reports are also exported as push-ready payloads under
+`data/reports/{date}/publish/`. The project writes structured JSON, Markdown,
+and plain text so later social-platform or app publishers can consume reports
+without reparsing the report archive.
+
 ## Dependency Policy
 
 - Add runtime dependencies to `requirements.txt`.

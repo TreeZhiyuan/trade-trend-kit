@@ -15,6 +15,7 @@ from trade_trend_kit.domain.models import (
     DailyReport,
     FetchResult,
     NormalizedTweet,
+    PublishPayload,
     PublishResult,
     RawTweetBatch,
     RuntimeState,
@@ -80,6 +81,6 @@ class ReportRepository(Protocol):
 class ReportPublisher(Protocol):
     """Port for future delivery channels such as social platforms or apps."""
 
-    async def publish_daily_report(self, report: DailyReport) -> PublishResult:
-        """Publish a daily report to one delivery channel."""
+    async def publish_daily_report(self, payload: PublishPayload) -> PublishResult:
+        """Publish a prepared daily report payload to one delivery channel."""
         ...

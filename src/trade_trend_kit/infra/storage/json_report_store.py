@@ -12,8 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from trade_trend_kit.domain.errors import StorageError
-from trade_trend_kit.domain.models import AccountIncrementalReport, DailyReport
+from trade_trend_kit.domain.models import AccountIncrementalReport, DailyReport, PublishPayload
 from trade_trend_kit.domain.ports import ReportRepository
+from trade_trend_kit.infra.publishing.payloads import build_daily_publish_payload
 from trade_trend_kit.utils.filenames import build_file_stem, build_report_file_stem
 from trade_trend_kit.utils.json_io import read_json_file, write_json_file, write_text_file
 from trade_trend_kit.utils.report_rendering import (
@@ -46,13 +47,16 @@ class JsonReportRepository(ReportRepository):
         """Persist the current daily aggregate snapshot and append history."""
 
         paths = self._daily_report_paths(report)
+        publish_paths = self._publish_payload_paths(report)
         payload = report.model_dump(mode="json")
         markdown = render_daily_report_markdown(report)
+        publish_payload = build_daily_publish_payload(report)
         self._write_latest(paths.latest_json, payload)
         self._write_latest_text(paths.latest_markdown, markdown)
         self._write_archive(paths.archive_json, payload)
         self._write_archive_text(paths.archive_markdown, markdown)
         self._write_history(paths.history_json, payload, key_field="updated_at")
+        self._write_publish_payload(publish_paths, publish_payload)
 
     def _account_report_paths(
         self,
@@ -80,6 +84,21 @@ class JsonReportRepository(ReportRepository):
             history_json=report_dir / "daily_report.history.json",
             archive_json=archive_dir / f"{archive_stem}.json",
             archive_markdown=archive_dir / f"{archive_stem}.md",
+        )
+
+    def _publish_payload_paths(self, report: DailyReport) -> "_PublishPayloadPaths":
+        report_dir = self.base_dir / report.date
+        publish_dir = report_dir / "publish"
+        archive_dir = publish_dir / "archive"
+        archive_stem = build_file_stem("publish_payload", report.updated_at.isoformat())
+        return _PublishPayloadPaths(
+            latest_json=publish_dir / "publish_payload.json",
+            latest_markdown=publish_dir / "publish_payload.md",
+            latest_text=publish_dir / "publish_payload.txt",
+            history_json=publish_dir / "publish_payload.history.json",
+            archive_json=archive_dir / f"{archive_stem}.json",
+            archive_markdown=archive_dir / f"{archive_stem}.md",
+            archive_text=archive_dir / f"{archive_stem}.txt",
         )
 
     def _write_latest(self, path: Path, payload: dict[str, Any]) -> None:
@@ -114,6 +133,22 @@ class JsonReportRepository(ReportRepository):
             merged[str(key)] = entry
         write_json_file(path, list(merged.values()))
 
+    def _write_publish_payload(
+        self,
+        paths: "_PublishPayloadPaths",
+        payload: PublishPayload,
+    ) -> None:
+        """Persist the push-ready daily payload in multiple reusable formats."""
+
+        json_payload = payload.model_dump(mode="json")
+        self._write_latest(paths.latest_json, json_payload)
+        self._write_latest_text(paths.latest_markdown, payload.markdown_body)
+        self._write_latest_text(paths.latest_text, payload.plain_text_body)
+        self._write_archive(paths.archive_json, json_payload)
+        self._write_archive_text(paths.archive_markdown, payload.markdown_body)
+        self._write_archive_text(paths.archive_text, payload.plain_text_body)
+        self._write_history(paths.history_json, json_payload, key_field="payload_id")
+
     def _load_history(self, path: Path) -> list[dict[str, Any]]:
         """Load an existing history file as a list of dicts."""
 
@@ -140,3 +175,16 @@ class _ReportArchivePaths:
     history_json: Path
     archive_json: Path
     archive_markdown: Path
+
+
+@dataclass(frozen=True)
+class _PublishPayloadPaths:
+    """Paths written when saving one push-ready daily payload."""
+
+    latest_json: Path
+    latest_markdown: Path
+    latest_text: Path
+    history_json: Path
+    archive_json: Path
+    archive_markdown: Path
+    archive_text: Path

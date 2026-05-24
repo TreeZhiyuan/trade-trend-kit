@@ -219,6 +219,10 @@ def test_json_report_repository_saves_latest_history_and_markdown_archives(
         tmp_path / "reports" / "2026-05-23" / "daily_report.history.json"
     )
     daily_archive_dir = tmp_path / "reports" / "2026-05-23" / "archive"
+    publish_dir = tmp_path / "reports" / "2026-05-23" / "publish"
+    publish_latest = read_json_file(publish_dir / "publish_payload.json")
+    publish_text = (publish_dir / "publish_payload.txt").read_text(encoding="utf-8")
+    publish_history = read_json_file(publish_dir / "publish_payload.history.json")
 
     assert account_latest["report_id"] == "report-1"
     assert len(account_history) == 1
@@ -232,3 +236,10 @@ def test_json_report_repository_saves_latest_history_and_markdown_archives(
     assert len(daily_history) == 1
     assert len(list(daily_archive_dir.glob("*.json"))) == 1
     assert len(list(daily_archive_dir.glob("*.md"))) == 1
+    assert publish_latest["title"] == "2026-05-23 投资方向参考报告"
+    assert publish_latest["candidate_symbols"][0]["symbol"] == "SPY"
+    assert "市场概览：" in publish_text
+    assert len(publish_history) == 1
+    assert len(list((publish_dir / "archive").glob("*.json"))) == 1
+    assert len(list((publish_dir / "archive").glob("*.md"))) == 1
+    assert len(list((publish_dir / "archive").glob("*.txt"))) == 1
