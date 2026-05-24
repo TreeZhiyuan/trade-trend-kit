@@ -112,6 +112,7 @@ Fetch Job
             |
             +--> data/reports/{date}/accounts
             +--> data/reports/{date}/daily_report.*
+            +--> data/reports/{date}/publish/publish_payload.*
 ```
 
 The scheduler reads the latest config before every run. This allows adding, disabling, or editing accounts without restarting the service.
@@ -152,13 +153,16 @@ src/trade_trend_kit/
     publishing/
       __init__.py
       noop_publisher.py
+      payloads.py
   config.py
   scheduler.py
   logging_config.py
   utils/
     __init__.py
+    env.py
     filenames.py
     json_io.py
+    report_rendering.py
     time.py
 ```
 
@@ -205,7 +209,7 @@ class ReportRepository(Protocol):
         ...
 
 class ReportPublisher(Protocol):
-    async def publish_daily_report(self, report: DailyReport) -> PublishResult:
+    async def publish_daily_report(self, payload: PublishPayload) -> PublishResult:
         ...
 ```
 
@@ -218,7 +222,7 @@ class ReportPublisher(Protocol):
 | Runtime state | `StateRepository` | `JsonStateRepository` | SQLite, Redis, Postgres |
 | LLM analysis | `TweetAnalyzer` | `OpenAICompatibleAnalyzer` | local model, Anthropic-compatible adapter, rule-based analyzer |
 | Reports | `ReportRepository` | `JsonReportRepository` | database-backed reports, blob storage |
-| Publishing | `ReportPublisher` | `NoopPublisher` | Telegram, Feishu, email, app backend, social platform publisher |
+| Publishing | `ReportPublisher` | `NoopReportPublisher` | Telegram, Feishu, email, app backend, social platform publisher |
 
 ### 6.4 Application Services
 
@@ -226,7 +230,7 @@ Application services should contain orchestration logic but no provider-specific
 
 Recommended services:
 
-- `FetchAndAnalyzeService`: one scheduled run across all enabled accounts.
+- `FetchAndAnalyzeJob`: one scheduled or one-shot run across all enabled accounts.
 - `AccountFetchService`: fetch and normalize one account.
 - `IncrementalAnalysisService`: select unanalyzed tweets and call analyzer.
 - `DailyReportService`: aggregate account reports into daily report.
@@ -241,14 +245,14 @@ Concrete adapters should be created in one composition root, such as `main.py` o
 Example:
 
 ```python
-def build_app(settings: Settings) -> FetchAndAnalyzeService:
+def build_fetch_job(settings: Settings) -> FetchAndAnalyzeJob:
     x_client = TwikitXPostClient(settings.twikit)
     tweet_repo = JsonTweetRepository(settings.paths)
     state_repo = JsonStateRepository(settings.paths.state_file)
     analyzer = OpenAICompatibleAnalyzer(settings.llm)
     report_repo = JsonReportRepository(settings.paths)
-    publisher = NoopPublisher()
-    return FetchAndAnalyzeService(
+    publisher = NoopReportPublisher()
+    return FetchAndAnalyzeJob(
         x_client=x_client,
         tweet_repo=tweet_repo,
         state_repo=state_repo,
@@ -383,10 +387,20 @@ data/
   reports/
     2026-05-22/
       accounts/
-        US_STOCK_macro_example_user.incremental.jsonl
+        us_stock_macro_example_user.latest.json
         US_STOCK_macro_example_user.latest.md
+        us_stock_macro_example_user.history.json
+        archive/
       daily_report.json
       daily_report.md
+      daily_report.history.json
+      archive/
+      publish/
+        publish_payload.json
+        publish_payload.md
+        publish_payload.txt
+        publish_payload.history.json
+        archive/
   runtime/
     cookies.json
     state.json
@@ -559,13 +573,6 @@ Adapter API:
 
 ```python
 class TwikitXPostClient:
-    async def get_user_latest_tweets(
-        self,
-        account: str,
-        limit: int,
-    ) -> tuple[XUser, list[RawTweet]]:
-        ...
-
     async def fetch_latest_posts(
         self,
         account: AccountConfig,
@@ -670,12 +677,12 @@ trade-trend-kit validate-config
 | Account not found | Mark account error and continue. |
 | No new tweets | Skip LLM call. |
 | LLM timeout | Save error, do not mark tweets analyzed. |
-| Invalid LLM JSON | Retry once, then save raw response. |
+| Invalid LLM JSON | Retry once, raise `AnalysisError`, record account failure, and do not mark tweets analyzed. Raw response file export is planned for Step 14. |
 | File write failure | Log critical error and keep state unchanged for affected account. |
 
 ## 15. Logging and Observability
 
-Log to both console and file.
+The current implementation initializes console logging from `LOG_LEVEL`. File logging and more structured per-account events are planned for Step 14.
 
 Important log events:
 
@@ -741,9 +748,11 @@ Testing should reinforce modular design.
 Recommended test levels:
 
 - **Unit tests**: config parsing, file naming, state deduplication, report aggregation, LLM JSON parsing.
-- **Service tests**: run `FetchAndAnalyzeService` with fake X client, fake repositories, and fake analyzer.
+- **Service tests**: run `FetchAndAnalyzeJob` with fake X client, local JSON repositories, and fake analyzer.
 - **Adapter tests**: test JSON repositories against temporary directories.
 - **Integration tests**: optional Twikit and LLM tests gated by environment variables so normal CI does not require real credentials.
+
+Current automated suite covers CLI parsing, config validation, domain models, fake end-to-end pipeline, incremental selection, OpenAI-compatible parsing/repair, publish payload generation, Markdown rendering, scheduler behavior, JSON storage, tweet normalization, and Twikit adapter boundary behavior.
 
 The first implementation should include fakes for key ports:
 
@@ -781,10 +790,13 @@ These fakes make future refactors safer and keep business logic testable without
 | Step 10 | 接入真实 OpenAI-compatible 分析器 | `infra/llm/openai_compatible.py`、`infra/llm/prompts.py` | Prompt 是否约束输出 JSON，是否保留英文摘要，失败重试和坏 JSON 是否可恢复 |
 | Step 11 | 计划任务与持续运行 | `scheduler.py`、`run` 命令、周期执行 | 是否 15 分钟调度，是否避免重叠执行，是否支持配置热重载 |
 | Step 12 | 发布与推送预留 | `infra/publishing/*`、日报导出格式 | 输出是否适合后续推送，字段是否足够稳定，是否便于不同渠道复用 |
+| Step 13 | 文档与设计一致性收口 | `docs/DETAILED_DESIGN.md`、`README.md` | 文档是否准确反映当前接口、命令、文件布局和剩余 backlog |
+| Step 14 | 可观测性与错误归档 | 结构化日志、LLM 原始错误响应归档、运行诊断文档 | 失败是否可定位，是否不泄露密钥/cookie，是否不误标记已分析推文 |
+| Step 15 | 可选真实集成测试 | gated Twikit/LLM integration tests、首次登录说明 | CI 是否默认离线，真实验证是否有明确环境变量开关 |
 
 当前实现状态：
 
-- Step 1 到 Step 12 已完成。
+- Step 1 到 Step 13 已完成。
 - MVP 主链路已经具备本地配置、Twikit/fake 抓取、增量分析、报告归档、调度运行和推送预留输出。
 
 ### 19.2 Per-step Review Focus
@@ -861,6 +873,7 @@ These fakes make future refactors safer and keep business logic testable without
 - Re-running `fetch-once` without new tweets does not call the LLM again.
 - New tweets produce account-level report JSON and Markdown.
 - Daily report files are updated under `data/reports/{date}`.
+- Push-ready payload files are updated under `data/reports/{date}/publish`.
 - The scheduler runs every 15 minutes without overlapping jobs.
 - Secrets and runtime files are ignored by git.
 - Application services can be tested without Twikit, real files, or real LLM calls.
@@ -868,8 +881,16 @@ These fakes make future refactors safer and keep business logic testable without
 
 ## 21. Open Questions
 
-- Which OpenAI-compatible provider and model should be the default in `.env.example`?
-- Should retweets and replies be included, or only original tweets?
-- Should quote tweets be analyzed together with quoted content when available?
-- Should daily reports be regenerated after every incremental account report, or only at a fixed end-of-day time?
-- Should `priority` influence analysis order only, or also future push ranking?
+| Question | Current Decision / Status |
+| --- | --- |
+| Which OpenAI-compatible provider and model should be the default in `.env.example`? | Default to OpenAI-compatible `https://api.openai.com/v1` with `gpt-4.1-mini`; users can override `LLM_BASE_URL` and `LLM_MODEL`. |
+| Should retweets and replies be included, or only original tweets? | Still open. Current Twikit adapter fetches the timeline response and normalizes returned tweets; filtering policy should be added explicitly if needed. |
+| Should quote tweets be analyzed together with quoted content when available? | Still open. Current normalizer analyzes available tweet text only; quote expansion can be a future normalizer enhancement. |
+| Should daily reports be regenerated after every incremental account report, or only at a fixed end-of-day time? | Current implementation regenerates the daily report after each cycle that produces at least one account report. |
+| Should `priority` influence analysis order only, or also future push ranking? | Current implementation uses lower `priority` for account processing order. Future push ranking remains open. |
+
+## 22. Backlog After Step 13
+
+- Step 14: Add richer observability, optional file logging, per-account lifecycle logs, LLM call timing, report write logs, and raw LLM error-response archives.
+- Step 15: Add gated real integration tests for Twikit and OpenAI-compatible providers, plus first-run login/cookie reuse documentation.
+- Future: Decide retweet/reply/quote handling policy and whether `priority` should affect push ranking.

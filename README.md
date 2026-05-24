@@ -47,6 +47,14 @@ Daily reports are also exported as push-ready payloads under
 and plain text so later social-platform or app publishers can consume reports
 without reparsing the report archive.
 
+## Real Adapter Setup
+
+Copy `.env.example` to `.env` before using real Twikit or LLM integrations.
+For Twikit, set `X_USERNAME`, `X_PASSWORD`, and optionally `X_EMAIL`; successful
+login can reuse `TWIKIT_COOKIES_PATH` on later runs. For OpenAI-compatible
+analysis, set `LLM_API_KEY` and override `LLM_BASE_URL` / `LLM_MODEL` if using
+another compatible provider.
+
 ## Dependency Policy
 
 - Add runtime dependencies to `requirements.txt`.
